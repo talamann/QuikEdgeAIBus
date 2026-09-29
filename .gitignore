@@ -1,0 +1,23 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+
+# Ray logs / scratch
+data/ray_logs/
+
+# Lightning / tensorboard scratch logs
+lightning_logs/
+
+# Editor lock files
+*.~lock.*#*
+
+# OS
+Desktop.ini
+Thumbs.db
+.DS_Store
+
+# Verification tasks temp
+*.tmp

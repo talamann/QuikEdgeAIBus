@@ -94,8 +94,19 @@ def training(config_file, type_env, use_callback, checkpoint_freq):
     #         "callbacks": CustomCallbacks
 
     #     })
-    
+    if ray.is_initialized():
+        ray.shutdown()
+
+# Ray'i tek bir düğüm olarak yerelde başlatın
+
     ray.init(local_mode=True)
+
+    # Single-node Windows fix: ray 2.32's local-filesystem storage validation
+    # (StorageContext._check_validation_file) cannot see the .validate_storage_marker
+    # from the saving actor and aborts checkpoint persistence with a generic
+    # "cluster storage" error. There is no real cluster here, so the check is a no-op.
+    from ray.train._internal.storage import StorageContext
+    StorageContext._check_validation_file = lambda self: None
 
     tuner = tune.Tuner(
         run_or_experiment,

@@ -1,0 +1,2 @@
+num_consolidated,num_moves,num_overloaded,num_model_switches,num_slav,cpu_conserved_cost,oversub_cores,reward_sla,reward_accuracy,reward_illegal,reward_consolidation,reward,mean_accuracy,mean_cluster_cpu_util,mean_cluster_mem_util,steps,mean_inference_time_ms
+26388.0,2441.0,0.0,2.0,4.6066666666666665,91522.0,4852.912989520131,-184.26666666666668,46666.6666666668,0.0,3019.083797861644,49501.483797861794,42.366666666666696,0.4464826392308854,0.27397946051838457,7000,1.981019399999468

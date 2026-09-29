@@ -31,7 +31,9 @@ class SimEdgeEnv(gym.Env, Scheduler):
         schedule_config = dict({
             'prediction_length': config['prediction_length'],
             'bitbrains_path': config['datasets']['bitbrains_path'],
-            'scheduler_path': config['scheduler_path']})
+            'scheduler_path': config['scheduler_path'],
+            'model_type': config.get('model_type', 'patchtst'),
+            'dlinear_epochs': config.get('dlinear_epochs', 30)})
         Scheduler.__init__(self, schedule_config) 
         self.no_action_on_overload = config['no_action_on_overloaded']
         self.workload = config['overload_threshold']

@@ -12,9 +12,15 @@ import time
 import datetime
 from sklearn.model_selection import train_test_split
 
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
 from neuralforecast import NeuralForecast
 from neuralforecast.models import PatchTST
 from neuralforecast.losses.pytorch import RMSE
+
+from experiments.dlinear_model import DLinear, build_windows
 
 # Suppress FutureWarning
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -25,10 +31,13 @@ class Scheduler:
         self.prediction_length = config['prediction_length']
         self.bitbrains_path = config['bitbrains_path']
         self.scheduler_path = config['scheduler_path']
+        self.model_type = config.get('model_type', 'patchtst')
+        self.dlinear_epochs = config.get('dlinear_epochs', 30)
         self.unique_cores = 3 # considering only 2, 4 and 6 core machines in this dataset
         self.patch_np_preds: List[np.ndarray] = []
         self.df = self.dataset_reading()
-        predictions_path = os.path.join(self.scheduler_path, 'patchtst_predictions_np.pkl')
+        predictions_file = 'dlinear_predictions_np.pkl' if self.model_type == 'dlinear' else 'patchtst_predictions_np.pkl'
+        predictions_path = os.path.join(self.scheduler_path, predictions_file)
         try:
             if os.path.exists(predictions_path):
                 # read the predictions with self to give access to sim_edge_env
@@ -38,6 +47,14 @@ class Scheduler:
                 model_pred_length = int(self.patch_np_preds[0].shape[0]/self.unique_cores)
                 assert self.prediction_length == model_pred_length,\
                     f"Pre-trained model prediction length is different from given. Either train a new model or use the prediction length {model_pred_length}."
+            elif self.model_type == 'dlinear':
+                df_train, df_test = self.train_test_split_local
+                dlinear = self.dlinear_training(df_train, self.prediction_length)
+                _, dlinear_np = self.dlinear_pred(model=dlinear, pred_length=self.prediction_length,
+                                                 df_train=df_train, df_test=df_test)
+                with open(predictions_path, 'wb') as f:
+                    pickle.dump(dlinear_np, f)
+                self.patch_np_preds = dlinear_np
             else:
                 # load the already trained model if available and make predictions
                 base_path = os.path.join(self.scheduler_path, 'patch_checkpoints/')
@@ -68,7 +85,91 @@ class Scheduler:
                         pickle.dump(patchtst_np, f)
                     self.patch_np_preds = patchtst_np
         except Exception as e:
-            raise Exception(f"PatchTST predictions error in the scheduler.py: {e}")
+            raise Exception(f"{self.model_type.upper()} predictions error in the scheduler.py: {e}")
+
+    def dlinear_training(self, df_train, pred_length):
+        """
+            pred_length: it is the length of future predictions. It can be any integer starting from 1
+        """
+        input_size = 48
+        arrays = {}
+        for uid in sorted(df_train['unique_id'].unique()):
+            arrays[int(uid)] = df_train.loc[df_train['unique_id'] == uid, 'y'].to_numpy(dtype=np.float32)
+
+        X_chunks, Y_chunks = [], []
+        for uid in sorted(arrays):
+            X, Y = build_windows(arrays[uid], input_size, pred_length)
+            X_chunks.append(X)
+            Y_chunks.append(Y)
+        X = np.concatenate(X_chunks)
+        Y = np.concatenate(Y_chunks)
+
+        dataset = TensorDataset(torch.from_numpy(X), torch.from_numpy(Y))
+        loader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+        model = DLinear(input_size=input_size, h=pred_length, moving_avg=25)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        criterion = nn.MSELoss()
+        model.train()
+        for epoch in range(1, self.dlinear_epochs + 1):
+            total = 0.0
+            for xb, yb in loader:
+                optimizer.zero_grad()
+                loss = criterion(model(xb), yb)
+                loss.backward()
+                optimizer.step()
+                total += loss.item() * xb.shape[0]
+            print(f"[dlinear-train] epoch {epoch}/{self.dlinear_epochs} mse={total / len(dataset):.4f}")
+        return model
+
+    def dlinear_pred(self, model, pred_length, df_train, df_test, iter: int = None):
+        """
+            This function takes input:
+            model: trained dlinear model object
+            pred_length: prediction length or horizon used for training
+            df_train: training dataset for auto-regressive mode predictions
+            df_test: testing set
+            iter: number of predictions. Maximum can be calculated from the testing set. If not given,
+                  then goes for maximum length of predictions
+        """
+        arrays = {}
+        for uid in sorted(df_train['unique_id'].unique()):
+            arrays[int(uid)] = df_train.loc[df_train['unique_id'] == uid, 'y'].to_numpy(dtype=np.float32)
+        test_arrays = {}
+        for uid in sorted(df_test['unique_id'].unique()):
+            test_arrays[int(uid)] = df_test.loc[df_test['unique_id'] == uid, 'y'].to_numpy(dtype=np.float32)
+
+        uids = sorted(arrays.keys())
+        contexts = {u: arrays[u].tolist() for u in uids}
+        offsets = {u: 0 for u in uids}
+        all_preds = []
+        all_preds_array = []
+        if not iter:
+            iter = int(df_test.shape[0] - (self.unique_cores*pred_length))
+        inf_time = []
+
+        model.eval()
+        with torch.no_grad():
+            for i in range(iter):
+                block = []
+                s_time = time.time()
+                for u in uids:
+                    win = np.asarray(contexts[u][-48:], dtype=np.float32)
+                    xt = torch.from_numpy(win).unsqueeze(0)
+                    pred = model(xt).squeeze(0).numpy()
+                    block.extend(pred.tolist())
+                inf = time.time() - s_time
+                inf_time.append(inf)
+                all_preds.append(block)
+                all_preds_array.append(np.asarray(block, dtype=np.float32))
+
+                for u in uids:
+                    if offsets[u] < len(test_arrays[u]):
+                        contexts[u].append(float(test_arrays[u][offsets[u]]))
+                        offsets[u] += 1
+
+        print(f"[dlinear-pred] iterations={len(all_preds_array)} avg_inf_ms={np.mean(inf_time)*1000:.2f}")
+        return all_preds, all_preds_array
 
     def patch_training(self, df_train, pred_length):
         """

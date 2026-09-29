@@ -7,7 +7,7 @@ import pathlib
 
 p = pathlib.Path(__file__)
 
-PROJECT_PATH = "/home/babarali/EdgeAIBus" # set the path of the EdgeAIBus project
+PROJECT_PATH = str(p.parent.parent.parent)  # repo root, machine-agnostic
 # DATA_PATH = "/data"
 
 # generated baesd on the users' path
