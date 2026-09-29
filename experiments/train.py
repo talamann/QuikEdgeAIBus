@@ -1,17 +1,21 @@
 import os
+import sys
+
+# Resolve local imports from any invocation dir (e.g. `python -m experiments.train`
+# puts repo root, not experiments/, on sys.path). Must happen before `from utils ...`.
+sys.path.append(os.path.dirname(__file__))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import click
 import json
 import pprint
 from copy import deepcopy
-import sys
 import ray
 from ray import tune
 from ray.rllib.algorithms.impala import ImpalaConfig
 from ray.air import CheckpointConfig, RunConfig
 from utils import CustomCallbacks
 #from scheduler.Scheduler import Scheduler
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from datacenter.Datacenter import * # TODO: update this list to import only reuqired functions
 
@@ -55,7 +59,7 @@ def impala_builder(env_class, env_config, use_callback:bool):
 
     return config.to_dict()
 
-def training(config_file, type_env, use_callback, checkpoint_freq):
+def training(config_file, type_env, use_callback, checkpoint_freq, model_type=None):
     generator_config = deepcopy(config_file)
     del generator_config['notes']
     bitbrains_path = os.path.join(DATASETS_PATH, "bitbrains/rnd")
@@ -64,6 +68,16 @@ def training(config_file, type_env, use_callback, checkpoint_freq):
     run_or_experiment = config_file['run_or_experiment']
 
     generator_config.update({'type_env': type_env})
+
+    # EXPLICIT arm routing: an optionally-given --model-type overrides whatever
+    # env_config_base.model_type is baked into the JSON, mirroring eval_verify
+    # semantics ('none' -> no_predictor arm). Leave untouched when not given so
+    # legacy PT configs (datacenter_sim) still route via their JSON value.
+    if model_type is not None:
+        env_config_base = generator_config['env_config_base']
+        env_config_base['model_type'] = None if model_type == 'none' else model_type
+        env_config_base['no_predictor'] = (model_type == 'none')
+
     datacenter = DatacenterGeneration(generator_config)
     #scheduler = Scheduler() 
 
@@ -115,7 +129,7 @@ def training(config_file, type_env, use_callback, checkpoint_freq):
                              verbose=1,
                              checkpoint_config=CheckpointConfig(
                                  num_to_keep=5,
-                                 checkpoint_frequency=100,
+                                 checkpoint_frequency=checkpoint_freq,
                                  checkpoint_at_end=True,
                              )
                              ),
@@ -133,8 +147,13 @@ def training(config_file, type_env, use_callback, checkpoint_freq):
              default='sim-edge')
 @click.option('--use-callback', required=True, type=bool, default=True)
 @click.option('--checkpoint-freq', required=False, type=int, default=100)
+@click.option('--model-type', required=False,
+             type=click.Choice(['patchtst', 'dlinear', 'none']), default=None,
+             help="Explicit arm routing: overrides env_config_base.model_type "
+                  "('none' also sets no_predictor=True). Default: use the "
+                  "config JSON's value.")
 
-def main(config_file: str, type_env: str, use_callback: bool, checkpoint_freq: int):
+def main(config_file: str, type_env: str, use_callback: bool, checkpoint_freq: int, model_type: str):
     """[summary]
 
     Args:
@@ -153,7 +172,11 @@ def main(config_file: str, type_env: str, use_callback: bool, checkpoint_freq: i
     print('start experiments with the following config:\n')
     pp.pprint(config)
 
-    training(config, type_env, use_callback, checkpoint_freq)
+    if model_type is not None:
+        print(f'>> arm routing: --model-type {model_type} '
+              f'(overrides json env_config_base.model_type)')
+
+    training(config, type_env, use_callback, checkpoint_freq, model_type)
 
 
 
