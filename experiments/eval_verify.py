@@ -209,6 +209,7 @@ def main():
     # Deterministic seeding BEFORE datacenter construction (all arms symmetric).
     from seeding import seed_everything
     seed = int(config_full.get("seed", 42))
+    rl_seed = int(config_full.get("learn_config", {}).get("seed", seed))
     seed_everything(seed)
 
     generator_config = deepcopy(config_full)
@@ -277,6 +278,7 @@ def main():
             "config_file": config_file,
             "config_path": config_path,
             "seed": seed,
+            "rl_seed": rl_seed,
             "git_rev": git_revision(),
             "git_dirty": git_dirty(),
             "steps": len(df),
