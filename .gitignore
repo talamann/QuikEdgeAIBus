@@ -21,3 +21,5 @@ Thumbs.db
 
 # Verification tasks temp
 *.tmp
+# verification eval outputs
+results/

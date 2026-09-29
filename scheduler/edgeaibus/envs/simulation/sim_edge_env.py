@@ -47,6 +47,11 @@ class SimEdgeEnv(gym.Env, Scheduler):
         self.sla_upper = config['sla_upper']
         self.episode_length = config['episode_length']
 
+        # Optional arm-disable for the predictor block (NO-PREDICTOR baseline arm).
+        # Keeps observation dimensionality identical: we only zero the
+        # cpu_predictions slice before preprocessing.
+        self.no_predictor = bool(config.get('no_predictor', False))
+
         self.penalty_consolidation = config['penalty_consolidation']
         self.penalty_accuracy = config['penalty_accuracy']
         self.penalty_sla = config['penalty_sla']
@@ -155,6 +160,8 @@ class SimEdgeEnv(gym.Env, Scheduler):
                 "mean_cluster_cpu_util": mean_cluster_util[0],
                 "mean_cluster_mem_util": mean_cluster_util[1],
                 "oversub_cores":self.datacenter.oversubscribed_cores,
+                "server_faults": int(num_overloaded),
+                "node_cpu_util_frac": self.datacenter.hosts_resources_usage_frac[:, 0],
                 'seed': self.base_env_seed}
 
         # TODO: Make sure that obs are correct with updated hosts, containers and other stats
@@ -270,8 +277,12 @@ class SimEdgeEnv(gym.Env, Scheduler):
 
         # self.pred_repeat_handler
 
+        cpu_preds = self.patch_np_preds[self.global_timesteps]
+        if self.no_predictor:
+            cpu_preds = np.zeros_like(cpu_preds)
+
         observation = {
-            "cpu_predictions": np.tile(self.patch_np_preds[self.global_timesteps], self.datacenter.core_repeator), 
+            "cpu_predictions": np.tile(cpu_preds, self.datacenter.core_repeator), 
             "hosts_resources_alloc": self.datacenter.hosts_resources_alloc[:,1:],
             "hosts_resources_req": self.datacenter.hosts_resources_requested_sim,
             "hosts_resources_usage": self.datacenter.hosts_resources_usages,    ## usage oriented, Remove the need of timestep
