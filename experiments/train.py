@@ -49,10 +49,8 @@ def impala_builder(env_class, env_config, use_callback:bool):
                   entropy_coeff=0.01,
                   )
         .debugging(log_level="INFO")
-        .rollouts(num_rollout_workers=2)
         .resources(num_gpus=0)
         .env_runners(num_env_runners=3)
-        #.rollouts(num_rollout_workers=2)
     )
     config.seed = 203
     config.buffer_size = 2048
