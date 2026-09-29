@@ -109,9 +109,8 @@ def training(config_file, type_env, use_callback, checkpoint_freq, model_type=No
     if ray.is_initialized():
         ray.shutdown()
 
-# Ray'i tek bir düğüm olarak yerelde başlatın
-
-    ray.init(local_mode=True)
+# Start Ray locally (single node). local_mode was removed in Ray 2.32.
+    ray.init()
 
     # Single-node Windows fix: ray 2.32's local-filesystem storage validation
     # (StorageContext._check_validation_file) cannot see the .validate_storage_marker
