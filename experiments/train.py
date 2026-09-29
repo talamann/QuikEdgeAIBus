@@ -49,6 +49,11 @@ def impala_builder(env_class, env_config, use_callback:bool):
                   entropy_coeff=0.01,
                   )
         .debugging(log_level="INFO")
+        # Archived runs (2024 PT + 2026-09 DLinear) all trained on the legacy
+        # API stack; the new EnvRunner stack rejects IMPALA's mixin replay
+        # buffer (replay_proportion=0.3) and produces different checkpoint
+        # formats, so keep the old stack for reproducibility.
+        .api_stack(enable_env_runner_and_connector_v2=False, enable_rl_module_and_learner=False)
         .resources(num_gpus=0)
         .env_runners(num_env_runners=3)
     )
